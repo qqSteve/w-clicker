@@ -1,0 +1,35 @@
+name: Build Windows executable
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build and test
+        shell: powershell
+        run: .\scripts\build.ps1
+
+      - name: Upload executable and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: WClicker-windows-x64
+          path: |
+            dist/WClicker.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
