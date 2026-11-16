@@ -1,0 +1,69 @@
+name: Upload tested release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Windows build workflow run ID
+        required: true
+        type: string
+      tag:
+        description: Existing draft release tag
+        required: true
+        default: v1.0.0
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: ${{ inputs.build_run }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Verify successful Windows build
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > build.json
+          python3 - <<'PY'
+          import json, os
+          with open('build.json') as f:
+              run = json.load(f)
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['path'] == '.github/workflows/build.yml'
+          assert run['head_repository']['full_name'] == os.environ['GH_REPO']
+          assert run['event'] in ('push', 'workflow_dispatch')
+          assert run['head_branch'] == 'main'
+          print('Verified build commit:', run['head_sha'])
+          PY
+
+      - name: Download and verify executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN_ID" --name WClicker-windows-x64 --dir release
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          directory = Path('release')
+          exe = (directory / 'WClicker.exe').read_bytes()
+          checksum = (directory / 'SHA256SUMS.txt').read_text().split()
+          assert checksum[1] == 'WClicker.exe'
+          assert hashlib.sha256(exe).hexdigest() == checksum[0]
+          assert exe[:2] == b'MZ'
+          print('Verified Windows executable:', len(exe), 'bytes')
+          PY
+
+      - name: Upload to existing draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" release/WClicker.exe release/SHA256SUMS.txt --clobber
